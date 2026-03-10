@@ -1,31 +1,38 @@
 const express = require('express');
 const fs = require('fs');
 const cors = require('cors');
+const bcrypt = require('bcrypt'); // для хэширования паролей
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+// Загрузка базы
 let db = {};
 try { db = JSON.parse(fs.readFileSync('db.json', 'utf-8')); } 
 catch(e){ db = {}; }
 
-function saveDB() { fs.writeFileSync('db.json', JSON.stringify(db, null, 2)); }
+function saveDB() {
+    fs.writeFileSync('db.json', JSON.stringify(db, null, 2));
+}
 
 // Регистрация
-app.post('/register', (req, res) => {
+app.post('/register', async (req, res) => {
     const { login, password } = req.body;
     if(!login || !password) return res.json({ error: "Введите логин и пароль" });
-    if(db[login]) return res.json({ error: "Пользователь уже существует" });
-    db[login] = { password, coins: 0 };
+    if(db[login]) return res.json({ error: "Этот логин уже занят" });
+    const hashedPassword = await bcrypt.hash(password, 10); // хэшируем пароль
+    db[login] = { password: hashedPassword, coins: 0 };
     saveDB();
     res.json({ coins: 0 });
 });
 
 // Вход
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
     const { login, password } = req.body;
-    if(!db[login] || db[login].password !== password) return res.json({ error: "Неверный логин или пароль" });
+    if(!db[login]) return res.json({ error: "Неверный логин или пароль" });
+    const match = await bcrypt.compare(password, db[login].password);
+    if(!match) return res.json({ error: "Неверный логин или пароль" });
     res.json({ coins: db[login].coins });
 });
 
