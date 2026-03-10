@@ -1,9 +1,12 @@
 // server.js
 const express = require('express');
+const fetch = require('node-fetch');
 const fs = require('fs');
+
 const app = express();
 app.use(express.json());
 
+// База данных игроков
 let db = {};
 try { 
   db = JSON.parse(fs.readFileSync('db.json', 'utf-8')); 
@@ -11,53 +14,58 @@ try {
   db = {}; 
 }
 
-function saveDB() {
+function saveDB(){
   fs.writeFileSync('db.json', JSON.stringify(db, null, 2));
 }
 
-// обновление игрока по токену
-function updatePlayer(token, coinsToAdd = 0){
-  if(!db[token]) db[token] = { coins: 0 };
-  db[token].coins += coinsToAdd;
+// Обновление игрока
+function updatePlayer(id, coinsToAdd = 0){
+  if(!db[id]) db[id] = { coins: 0 };
+  db[id].coins += coinsToAdd;
   saveDB();
-  return db[token].coins;
+  return db[id].coins;
 }
 
-// лидерборд
+// Лидерборд
 function getLeaderboard(top=5){
   const sorted = Object.entries(db).sort((a,b) => b[1].coins - a[1].coins);
   return sorted.slice(0, top)
-    .map(([token, data], i) => `${i+1}. ${token}: ${data.coins}💰`)
+    .map(([id, data], i) => `${i+1}. ${id}: ${data.coins}💰`)
     .join('\n');
 }
 
-// регистрация нового токена
-app.post('/register', (req,res)=>{
-  const { token } = req.body;
-  if(!token) return res.status(400).json({error:'Token required'});
-  if(!db[token]) db[token] = { coins:0 };
-  saveDB();
-  res.json({ token, coins: db[token].coins });
+// Отправка сообщения
+async function sendMessage(chatId, text){
+  await fetch(`https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendMessage`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({chat_id: chatId, text})
+  });
+}
+
+// Вебхук для Telegram
+app.post('/webhook', async (req,res)=>{
+  const msg = req.body.message;
+  if(!msg) return res.sendStatus(200);
+
+  const chatId = msg.chat.id;
+  const text = msg.text;
+
+  if(text === "/coin"){
+    // Начисляем монету
+    const coins = updatePlayer(chatId, 1);
+    await sendMessage(chatId, `💰 Вы получили 1 монету!\nВсего: ${coins}💰`);
+
+  } else if(text === "/leaderboard"){
+    const board = getLeaderboard();
+    await sendMessage(chatId, board ? "🏆 Лидерборд:\n"+board : "Пока нет игроков");
+
+  } else {
+    await sendMessage(chatId, "Выберите действие:\n/coin - монета\n/leaderboard - лидерборд");
+  }
+
+  res.sendStatus(200);
 });
 
-// получить количество монет
-app.get('/coins', (req,res)=>{
-  const token = req.query.token;
-  if(!token || !db[token]) return res.status(400).json({ error: 'Invalid token' });
-  res.json({ coins: db[token].coins });
-});
-
-// добавить монеты
-app.post('/add', (req,res)=>{
-  const { token, amount } = req.body;
-  if(!token || !db[token]) return res.status(400).json({ error: 'Invalid token' });
-  const coins = updatePlayer(token, Number(amount) || 0);
-  res.json({ coins });
-});
-
-// лидерборд
-app.get('/leaderboard', (req,res)=>{
-  res.json({ leaderboard: getLeaderboard() });
-});
-
+// Запуск сервера
 app.listen(process.env.PORT || 3000, ()=>console.log("Server running"));
